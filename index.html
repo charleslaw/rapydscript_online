@@ -48,7 +48,7 @@
   <body>
     <div class="title">
         <a href="http://rapydscript.pyjeon.com">
-          <img src="rapydscript.png">
+          <img src="http://pyjeon.pythonanywhere.com/static/images/rapydscript.png">
         </a>
         RapydScript Demo
         </div>
@@ -106,7 +106,7 @@ def factorial(n):
           preview.setValue(String(output) + '\n');
         } catch(err) {
           if (from_error) {
-              preview.setValue(err.message);
+              preview.setValue("ERROR: " + err.message + ". Line " + err.line + ", column " + err.col + ".");
           } else {
             clearTimeout(delay);
             delay = setTimeout(function(){updatePreview(true);}, 2000);
