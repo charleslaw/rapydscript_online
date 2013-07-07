@@ -10,16 +10,25 @@
     <style type=text/css>
       .CodeMirror {
         border: 1px solid black;
-        height: 400px;
-      }
-      .cm-s-input {
+        height: 100%;
+        width: 49.5%;
         float: left;
-        width: 50%;
       }
       .cm-s-output {
-        width: 49%;
-        float: left;
-        border-left: 0px;
+        border-left: 1px;
+      }
+      .title {
+        font-size: 1.75em;
+        font-family: 'Roboto Condensed', arial, sans-serif;
+        font-weight: bold;
+        height: 3em;
+      }
+      .page {
+        position: absolute;
+        top: 3em;
+        left: 0;
+        right: 0;
+        bottom: 1em;
       }
     </style>
     <script type="text/javascript" src="rapydscript/utils.js"></script>
@@ -29,13 +38,16 @@
     <script type="text/javascript" src="rapydscript/parse.js"></script>
   </head>
   <body>
-    <h1>RapydScript Demo</h1>
+    <div class="title">RapydScript Demo</div>
+    <div class="page">
 <textarea id=code name=code>
-def fun():
-    a = 1
+def factorial(n):
+    if n == 0:
+        return 1
+    return n * factorial(n-1)
 </textarea>
-    <textarea class=output id=preview></textarea>
-
+      <textarea class=output id=preview></textarea>
+    </div>
 
     <script>
       var delay;
@@ -45,7 +57,6 @@ def fun():
         indentUnit: 4,
         lineNumbers: true,
         autofocus: true,
-        theme: "default input"
       });
       var preview = CodeMirror.fromTextArea(document.getElementById('preview'), {
         mode: 'text/javascript',
