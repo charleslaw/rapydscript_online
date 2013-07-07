@@ -67,11 +67,8 @@ def factorial(n):
 
       editor.on("change", function() {
         clearTimeout(delay);
-        delay = setTimeout(updatePreview, 600);
+        delay = setTimeout(function(){updatePreview(false);}, 500);
       });
-      function updatePreview() {
-        preview.setValue(getJavaScript(editor.getValue()));
-      }
 
       //RapydScript options
       var rs_options = {
@@ -86,15 +83,21 @@ def factorial(n):
         "omit_baselib":true
       };
 
-      function getJavaScript(rapydscript_string) {
+      function updatePreview(from_error) {
+        var rapydscript_string = editor.getValue();
         output = OutputStream(output_opts)
         rapydscript_string += '\n'; //just to be safe
         try {
           TOPLEVEL = parse(rapydscript_string, rs_options);
           TOPLEVEL.print(output);
-          return String(output) + '\n';
+          preview.setValue(String(output) + '\n');
         } catch(err) {
-          return String(err);
+          if (from_error) {
+              preview.setValue(String(err));
+          } else {
+            clearTimeout(delay);
+            delay = setTimeout(function(){updatePreview(true);}, 2000);
+          }
         }
       }
 
