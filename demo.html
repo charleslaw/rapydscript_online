@@ -29,8 +29,8 @@
             document.write(js_code);
             console.log(js_code);
         } catch(err) {
-            document.write(String(err));
-            console.log(String(err));
+            document.write(err.message);
+            console.log(err.message);
         }
     }
     var test_input = 'def hi():\n\ta = 1\n';

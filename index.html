@@ -93,7 +93,7 @@ def factorial(n):
           preview.setValue(String(output) + '\n');
         } catch(err) {
           if (from_error) {
-              preview.setValue(String(err));
+              preview.setValue(err.message);
           } else {
             clearTimeout(delay);
             delay = setTimeout(function(){updatePreview(true);}, 2000);
