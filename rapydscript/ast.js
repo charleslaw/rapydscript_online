@@ -29,7 +29,7 @@
           disclaimer in the documentation and/or other materials
           provided with the distribution.
 
-    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER “AS IS” AND ANY
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER â€œAS ISâ€ AND ANY
     EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
     IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
     PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE
@@ -405,18 +405,21 @@ var AST_Class = DEFNODE("Class", "init name parent static", {
     }
 }, AST_Scope);
 
-var AST_Defun = DEFNODE("Defun", null, {
-    $documentation: "A function definition"
+var AST_Defun = DEFNODE("Defun", "static", {
+    $documentation: "A class method definition",
+    $propdoc: {
+        static: "[boolean] true if method is static"
+    }
 }, AST_Lambda);
 
 /* -----[ JUMPS ]----- */
 
 var AST_Jump = DEFNODE("Jump", null, {
-    $documentation: "Base class for “jumps” (for now that's `return`, `throw`, `break` and `continue`)"
+    $documentation: "Base class for â€œjumpsâ€ (for now that's `return`, `throw`, `break` and `continue`)"
 }, AST_Statement);
 
 var AST_Exit = DEFNODE("Exit", "value", {
-    $documentation: "Base class for “exits” (`return` and `throw`)",
+    $documentation: "Base class for â€œexitsâ€ (`return` and `throw`)",
     $propdoc: {
         value: "[AST_Node?] the value returned or thrown by this statement; could be null for AST_Return"
     },
@@ -477,7 +480,7 @@ var AST_If = DEFNODE("If", "condition alternative", {
 var AST_Switch = DEFNODE("Switch", "expression", {
     $documentation: "A `switch` statement",
     $propdoc: {
-        expression: "[AST_Node] the `switch` “discriminant”"
+        expression: "[AST_Node] the `switch` â€œdiscriminantâ€"
     },
     _walk: function(visitor) {
         return visitor._visit(this, function(){
@@ -699,7 +702,7 @@ var AST_Seq = DEFNODE("Seq", "car cdr", {
 var AST_PropAccess = DEFNODE("PropAccess", "expression property", {
     $documentation: "Base class for property access expressions, i.e. `a.foo` or `a[\"foo\"]`",
     $propdoc: {
-        expression: "[AST_Node] the “container” expression",
+        expression: "[AST_Node] the â€œcontainerâ€ expression",
         property: "[AST_Node|string] the property to access.  For AST_Dot this is always a plain string, while for AST_Sub it's an arbitrary AST_Node"
     }
 });
@@ -776,7 +779,7 @@ var AST_Conditional = DEFNODE("Conditional", "condition consequent alternative",
 });
 
 var AST_Assign = DEFNODE("Assign", null, {
-    $documentation: "An assignment expression — `a = b + 5`",
+    $documentation: "An assignment expression â€” `a = b + 5`",
 }, AST_Binary);
 
 /* -----[ LITERALS ]----- */

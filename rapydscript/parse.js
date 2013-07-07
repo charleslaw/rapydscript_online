@@ -29,7 +29,7 @@
           disclaimer in the documentation and/or other materials
           provided with the distribution.
 
-    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER “AS IS” AND ANY
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER â€œAS ISâ€ AND ANY
     EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
     IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
     PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE
@@ -61,7 +61,7 @@ var NATIVE_CLASSES = {
     'Image': {},
     'RegExp': {},
     'Error': {},
-    'Object': {},
+    'Object': {static: ['getOwnPropertyNames']},
     'String': {static: ['fromCharCode']},
     'Array': {},
     'Number': {},
@@ -262,7 +262,9 @@ function tokenizer($TEXT, filename) {
         newblock        : false,
         endblock        : false,
         indentation_matters: [true],
-        cached_whitespace: ''
+        cached_whitespace: '',
+        prev            : undefined,
+        index_or_slice  : [false]
     };
 
     function peek() { return S.text.charAt(S.pos); };
@@ -327,6 +329,7 @@ function tokenizer($TEXT, filename) {
         if (type == "punc") {
 //            if (value == ":" && peek() == "\n") {
             if (value == ":"
+            && !S.index_or_slice.slice(-1)[0]
             && (
                 !S.text.substring(S.pos+1, find('\n')).trim()
                 || !S.text.substring(S.pos+1,find('#')).trim())
@@ -335,20 +338,27 @@ function tokenizer($TEXT, filename) {
                 S.indentation_matters.push(true);
             }
             switch (value) {
-                case "{":
                 case "[":
+                    if (S.prev && S.prev.type == "name")
+                        S.index_or_slice.push(true);
+                    else
+                        S.index_or_slice.push(false);
+                case "{":
                 case "(":
                     S.indentation_matters.push(false);
                     break;
-                case "}":
                 case "]":
+                    S.index_or_slice.pop();
+                case "}":
                 case ")":
                     S.indentation_matters.pop();
                     break;
             }
         }
 //        console.log(ret.type, ret.value);
-        return new AST_Token(ret);
+//        return new AST_Token(ret);
+        S.prev = new AST_Token(ret);
+        return S.prev;
     };
 
     // this will transform leading whitespace to block tokens unless
@@ -363,9 +373,11 @@ function tokenizer($TEXT, filename) {
             if (ch == "\n") leading_whitespace = '';
             else leading_whitespace += ch;
         }
-        if (!whitespace_exists) leading_whitespace = S.cached_whitespace;
-        else S.cached_whitespace = leading_whitespace;
-        if (S.newline_before || S.endblock) return test_indent_token(leading_whitespace);
+        if (peek() != '#') {
+            if (!whitespace_exists) leading_whitespace = S.cached_whitespace;
+            else S.cached_whitespace = leading_whitespace;
+            if (S.newline_before || S.endblock) return test_indent_token(leading_whitespace);
+        }
     };
 
     function test_indent_token(leading_whitespace) {
@@ -692,7 +704,7 @@ function tokenizer($TEXT, filename) {
             return next_token();
         }
         if (code == 92 || is_identifier_start(code)) return read_word();
-        parse_error("Unexpected character «" + ch + "»");
+        parse_error("Unexpected character '" + ch + "'");
     };
 
     next_token.context = function(nc) {
@@ -817,14 +829,14 @@ function parse($TEXT, options) {
     function unexpected(token) {
         if (token == null)
             token = S.token;
-        token_error(token, "Unexpected token: " + token.type + " «" + token.value + "»");
+        token_error(token, "Unexpected token: " + token.type + " '" + token.value + "'");
     };
 
     function expect_token(type, val) {
         if (is(type, val)) {
             return next();
         }
-        token_error(S.token, "Unexpected token " + S.token.type + " «" + S.token.value + "»" + ", expected " + type + " «" + val + "»");
+        token_error(S.token, "Unexpected token " + S.token.type + " '" + S.token.value + "'" + ", expected " + type + " '" + val + "'");
     };
 
     function expect(punc) { return expect_token("punc", punc); };
@@ -917,6 +929,21 @@ function parse($TEXT, options) {
         return vars;
     }
 
+    function finalize_import(imp) {
+        var classes = scan_for_classes(imp.body.body);
+        for (var c in classes) {
+            S.classes[0][c] = classes[c];
+        }
+        var key = "";
+        while (imp instanceof AST_Dot) {
+            key = '.' + imp.property + key;
+            imp = imp.expression;
+        }
+        key = imp.name + key;
+        IMPORTED[key] = true;
+        return imp;
+    }
+
     var statement = embed_tokens(function() {
         var tmp;
         if (is("operator", "/") || is("operator", "/=")) {
@@ -988,22 +1015,10 @@ function parse($TEXT, options) {
                 return for_();
 
               case "from":
-                var imp = from_import_();
-                var classes = scan_for_classes(imp.body.body);
-                for (var c in classes) {
-                    S.classes[0][c] = classes[c];
-                }
-                IMPORTED[imp] = true;
-                return imp;
+                return finalize_import(from_import_());
 
               case "import":
-                var imp = import_();
-                var classes = scan_for_classes(imp.body.body);
-                for (var c in classes) {
-                    S.classes[0][c] = classes[c];
-                }
-                IMPORTED[imp] = true;
-                return imp;
+                return finalize_import(import_());
 
               case "class":
                 return class_(true);
@@ -1178,10 +1193,10 @@ function parse($TEXT, options) {
     function get_class_in_scope(expr) {
         if (expr instanceof AST_SymbolRef) {
             // check Native JS classes
-            if (expr.name in NATIVE_CLASSES) return NATIVE_CLASSES[expr.name];
+            if (NATIVE_CLASSES.hasOwnProperty(expr.name)) return NATIVE_CLASSES[expr.name];
             // traverse in reverse to check local variables first
             for (var s=S.classes.length-1;s>=0;s--) {
-                if (S.classes[s][expr.name]) return S.classes[s][expr.name];
+                if (S.classes[s].hasOwnProperty(expr.name)) return S.classes[s][expr.name];
             }
         }
 //        else if (expr instanceof AST_Dot) {
@@ -1193,13 +1208,14 @@ function parse($TEXT, options) {
     }
 
     var import_ = function() {
-        var name = expression(false);
+        var name, tmp;
+        tmp = name = expression(false);
         var file = '.pyj';
-        while (name instanceof AST_Dot) {
-            file = '/' + name.property + file;
-            name = name.expression;
+        while (tmp instanceof AST_Dot) {
+            file = '/' + tmp.property + file;
+            tmp = tmp.expression;
         }
-        file = name.name + file;
+        file = tmp.name + file;
         var contents = null;
         try {
             contents = parse(options.readfile(options.basedir + "/" + file, "utf-8"), {
@@ -1326,8 +1342,11 @@ function parse($TEXT, options) {
                     : null);
         if (in_class && !name)
             unexpected();
-        if (in_class && S.decorators.indexOf("staticmethod") != -1)
+        var staticmethod = false;
+        if (in_class && S.decorators.indexOf("staticmethod") != -1) {
             S.classes[S.classes.length-2][in_class].static.push(name.name);
+            staticmethod = true;
+        }
         expect("(");
         if (!ctor) ctor = in_class ? AST_Defun : AST_Function;
         var definition = new ctor({
@@ -1379,6 +1398,7 @@ function parse($TEXT, options) {
                 return d;
             })()
         });
+        if (definition instanceof AST_Defun) definition.static = staticmethod;
         var assignments = scan_for_local_vars(definition.body);
         for (var i=0; i < assignments.length; i++) {
             for (var j=0; j <= definition.argnames.length; j++) {
@@ -1790,7 +1810,7 @@ function parse($TEXT, options) {
             return null;
         }
         var name = S.token.value;
-        var sym = new (name == "this" || name == "self" ? AST_This : type)({
+        var sym = new (name == "this" ? AST_This : type)({
             name  : String(S.token.value),
             start : S.token,
             end   : S.token
@@ -1801,7 +1821,7 @@ function parse($TEXT, options) {
 
     // for generating/inserting a new symbol
     function new_symbol(type, name) {
-        var sym = new (name == "this" || name == "self" ? AST_This : type)({
+        var sym = new (name == "this" ? AST_This : type)({
             name  : String(name),
             start : null,
             end   : null
@@ -1810,7 +1830,7 @@ function parse($TEXT, options) {
     };
 
     function is_static_method(cls, method) {
-        if (cls.static.indexOf(method) != -1)
+        if (cls.static && cls.static.indexOf(method) != -1)
             return true;
         else
             return false;
@@ -1910,6 +1930,9 @@ function parse($TEXT, options) {
                         case "print":
                         case "range":
                         case "reversed":
+                        case "getattr":
+                        case "setattr":
+                        case "hasattr":
                           BASELIB[expr.name] = true;
                           break;
                         case "type":
@@ -1969,7 +1992,7 @@ function parse($TEXT, options) {
 
     function make_unary(ctor, op, expr) {
         if (op == "++" || op == "--")
-            croak("Invalid operator «" + op + "»");
+            croak("Invalid operator '" + op + "'");
         return new ctor({ operator: op, expression: expr });
     };
 

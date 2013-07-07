@@ -6,7 +6,7 @@ function enumerate(item) {
     return arr;
 }
 function _$rapyd$_in(val, arr) {
-    if (arr instanceof Array) return arr.indexOf(val) != -1;
+    if (arr instanceof Array || typeof arr === "string") return arr.indexOf(val) != -1;
     else return val in arr;
 }
 function len(obj) {
@@ -53,4 +53,13 @@ function reversed(arr) {
         tmp.push(arr[i]);
     }
     return tmp;
+}
+function getattr(obj, name) {
+    return obj[name];
+}
+function setattr(obj, name, value) {
+    obj[name] = value;
+}
+function hasattr(obj, name) {
+    return name in obj;
 }

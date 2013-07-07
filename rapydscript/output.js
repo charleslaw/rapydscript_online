@@ -29,7 +29,7 @@
           disclaimer in the documentation and/or other materials
           provided with the distribution.
 
-    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER “AS IS” AND ANY
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER â€œAS ISâ€ AND ANY
     EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
     IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
     PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE
@@ -292,7 +292,7 @@ function OutputStream(options) {
                 (!name && token.type == "name") ? token.value : name
             );
         } catch(ex) {
-            AST_Node.warn("Couldn't figure out mapping for {file}:{line},{col} → {cline},{ccol} [{name}]", {
+            AST_Node.warn("Couldn't figure out mapping for {file}:{line},{col} â†’ {cline},{ccol} [{name}]", {
                 file: token.file,
                 line: token.line,
                 col: token.col,
@@ -378,7 +378,7 @@ function OutputStream(options) {
                 return func_gen("_$rapyd$_in", {
                     args: ['val', 'arr'],
                     body: [
-                        ['if', {parens: ['arr', 'instanceof', 'Array']}, 'return', 'arr.indexOf(val)', '!=', '-1'],
+                        ['if', {parens: ['arr', 'instanceof', 'Array', '||', 'typeof', 'arr', '===', '"string"']}, 'return', 'arr.indexOf(val)', '!=', '-1'],
                         ['else', 'return', 'val', 'in', 'arr']
                     ]
                 });
@@ -475,6 +475,30 @@ function OutputStream(options) {
                         ['return', 'tmp']
                     ]
                 });
+            },
+            "getattr": function() {
+                return func_gen("getattr", {
+                   args: ['obj', 'name'],
+                   body: [
+                       ['return', 'obj[name]']
+                   ]
+                });
+            },
+            "setattr": function() {
+                return func_gen("setattr", {
+                    args: ['obj', 'name', 'value'],
+                    body: [
+                        ['obj[name]', '=', 'value']
+                    ]
+                });
+            },
+            "hasattr": function() {
+                return func_gen("hasattr", {
+                    args: ['obj', 'name'],
+                    body: [
+                        ['return', 'name', 'in', 'obj']
+                    ]
+                });
             }
         };
         lib[key]();
@@ -529,8 +553,14 @@ function OutputStream(options) {
         assign          : assign_var,
         prologue        : prologue,
         import          : function(module) {
-            var should_import = !IMPORTED[module]
-            IMPORTED[module] = true;
+            var key = "";
+            while (module instanceof AST_Dot) {
+                key = '.' + module.property + key;
+                module = module.expression;
+            }
+            key = module.name + key;
+            var should_import = !IMPORTED[key]
+            IMPORTED[key] = true;
             return should_import;
         },
         is_main         : function() { return OUTPUT.length == 0 },
@@ -560,6 +590,7 @@ function OutputStream(options) {
         'int'   : 'parseInt',
         'print' : '_$rapyd$_print'
     };
+    var INDEX_COUNTER = 0;
     function DEFPRINT(nodetype, generator) {
         nodetype.DEFMETHOD("_codegen", generator);
     };
@@ -749,19 +780,19 @@ function OutputStream(options) {
 
     function assign_and_conditional_paren_rules(output) {
         var p = output.parent();
-        // !(a = false) → true
+        // !(a = false) â†’ true
         if (p instanceof AST_Unary)
             return true;
-        // 1 + (a = 2) + 3 → 6, side effect setting a = 2
+        // 1 + (a = 2) + 3 â†’ 6, side effect setting a = 2
         if (p instanceof AST_Binary && !(p instanceof AST_Assign))
             return true;
-        // (a = func)() —or— new (a = Object)()
+        // (a = func)() â€”orâ€” new (a = Object)()
         if (p instanceof AST_BaseCall && p.expression === this)
             return true;
         // (a = foo) ? bar : baz
         if (p instanceof AST_Conditional && p.condition === this)
             return true;
-        // (a = foo)["prop"] —or— (a = foo).prop
+        // (a = foo)["prop"] â€”orâ€” (a = foo).prop
         if (p instanceof AST_PropAccess && p.expression === this)
             return true;
     };
@@ -799,24 +830,33 @@ function OutputStream(options) {
 
     function display_complex_body(node, is_toplevel, output) {
         // if *args is set, declare function differently
+        var offset = 0;
+        if (node instanceof AST_Defun && !node.static) {
+            output.indent();
+            output.print("var");
+            output.space();
+            output.assign(node.argnames[0]);
+            output.print("this");
+            output.semicolon();
+            output.newline();
+            offset++;
+        }
         if (node instanceof AST_Scope) {
             if (node.argnames) {
                 if (node.argnames.starargs) {
                     node.argnames.forEach(function(arg, i){
-                        output.indent();
-                        output.print("var");
-                        output.space();
-                        output.assign(arg);
-    //                    arg.print(output);
-    //                    output.space();
-    //                    output.print("=");
-    //                    output.space();
-                        output.print("arguments");
-                        output.with_square(function(){
-                            output.print(i);
-                        });
-                        output.semicolon();
-                        output.newline();
+                        if (i >= offset) {
+                            output.indent();
+                            output.print("var");
+                            output.space();
+                            output.assign(arg);
+                            output.print("arguments");
+                            output.with_square(function(){
+                                output.print(i-offset);
+                            });
+                            output.semicolon();
+                            output.newline();
+                        }
                     });
                     output.indent();
                     output.print("var");
@@ -826,7 +866,7 @@ function OutputStream(options) {
                     output.with_parens(function(){
                         output.print("arguments");
                         output.comma();
-                        output.print(node.argnames.length);
+                        output.print(node.argnames.length-offset);
                     });
                     output.semicolon();
                     output.newline();
@@ -845,10 +885,6 @@ function OutputStream(options) {
                     });
                     output.space();
                     output.assign(arg);
-    //                output.print(arg);
-    //                output.space();
-    //                output.print("=");
-    //                output.space();
                     force_statement(node.argnames.defaults[arg], output);
                     output.semicolon();
                     output.newline();
@@ -954,7 +990,7 @@ function OutputStream(options) {
 //        IMPORTED[self.module.name] = true;
 //    });
     DEFPRINT(AST_Import, function(self, output){
-        if (output.import(self.module.name)) {
+        if (output.import(self.module)) {
             if (!output.option("namespace_imports")) {
                 self.body.print(output);
             } else {
@@ -1102,14 +1138,15 @@ function OutputStream(options) {
                 output.indent();
                 if (self.init instanceof AST_Array) {
                     output.assign("_$rapyd$_Unpack");
-                    output.print("_$rapyd$_Iter[_$rapyd$_Index];");
+                    output.print("_$rapyd$_Iter" + INDEX_COUNTER + "[_$rapyd$_Index" + INDEX_COUNTER + "];");
                     output.newline();
                     unpack_tuple(self.init, output);
                 } else {
                     output.assign(self.init);
-                    output.print("_$rapyd$_Iter[_$rapyd$_Index];");
+                    output.print("_$rapyd$_Iter" + INDEX_COUNTER + "[_$rapyd$_Index" + INDEX_COUNTER + "];");
                     output.newline();
                 }
+                INDEX_COUNTER++;
             }
             self.body.body.forEach(function(stmt, i){
                 output.indent();
@@ -1169,7 +1206,7 @@ function OutputStream(options) {
                 }
             });
         } else {
-            output.assign("_$rapyd$_Iter");
+            output.assign("var _$rapyd$_Iter" + INDEX_COUNTER);
             self.object.print(output);
             output.semicolon();
             output.newline();
@@ -1188,18 +1225,18 @@ function OutputStream(options) {
 //                self.object.print(output);
                 output.print("var");
                 output.space();
-                output.assign("_$rapyd$_Index");
+                output.assign("_$rapyd$_Index" + INDEX_COUNTER);
                 output.print("0");
                 output.semicolon();
                 output.space();
-                output.print("_$rapyd$_Index");
+                output.print("_$rapyd$_Index" + INDEX_COUNTER);
                 output.space();
                 output.print("<");
                 output.space();
-                output.print("_$rapyd$_Iter.length");
+                output.print("_$rapyd$_Iter" + INDEX_COUNTER + ".length");
                 output.semicolon();
                 output.space();
-                output.print("_$rapyd$_Index++");
+                output.print("_$rapyd$_Index" + INDEX_COUNTER + "++");
             });
         }
         output.space();
@@ -1449,12 +1486,14 @@ function OutputStream(options) {
             }
             output.print("function");
             output.with_parens(function(){
-                stmt.argnames.forEach(function(arg, i){
-                    // only strip first argument if the method isn't static
-                    if (self.static.indexOf(name) != -1) i = 1;
-                    if (i > 1) output.comma();
-                    if (i) arg.print(output);
-                });
+                if (!stmt.argnames.starargs) {
+                    stmt.argnames.forEach(function(arg, i){
+                        // only strip first argument if the method isn't static
+                        if (self.static.indexOf(name) != -1) i = 1;
+                        if (i > 1) output.comma();
+                        if (i) arg.print(output);
+                    });
+                }
             });
             print_bracketed(stmt, output, true);
             output.semicolon();
@@ -1810,7 +1849,9 @@ function OutputStream(options) {
                 output.print(".call");
             }
         } else {
-            var rename = SPECIAL_METHODS[self.expression.name]
+            var rename = SPECIAL_METHODS.hasOwnProperty(self.expression.name)
+                ? SPECIAL_METHODS[self.expression.name]
+                : undefined;
             if (rename) output.print(rename);
             else self.expression.print(output);
         }
