@@ -22,6 +22,14 @@
         font-family: 'Roboto Condensed', arial, sans-serif;
         font-weight: bold;
         height: 3em;
+        vertical-align: top;
+      }
+      .title img {
+        height: 1em;
+        padding-right: 0.25em;
+      }
+      .title a {
+        text-decoration: none;
       }
       .page {
         position: absolute;
@@ -38,7 +46,12 @@
     <script type="text/javascript" src="rapydscript/parse.js"></script>
   </head>
   <body>
-    <div class="title">RapydScript Demo</div>
+    <div class="title">
+        <a href="http://rapydscript.pyjeon.com">
+          <img src="rapydscript.png">
+        </a>
+        RapydScript Demo
+        </div>
     <div class="page">
 <textarea id=code name=code>
 def factorial(n):
