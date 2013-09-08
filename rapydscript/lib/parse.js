@@ -1217,24 +1217,11 @@ function parse($TEXT, options) {
         }
         file = tmp.name + file;
         var contents = null;
-        try {
-            contents = parse(options.readfile(options.basedir + "/" + file, "utf-8"), {
-                filename: file,
-                toplevel: contents,
-                readfile: options.readfile,
-                basedir: options.basedir,
-                libdir: options.libdir
-            });
-        } catch (e) {
-            contents = parse(options.readfile(options.libdir + "/" + file, "utf-8"), {
-                // didn't find it in local directory, check libs
-                filename: file,
-                toplevel: contents,
-                readfile: options.readfile,
-                basedir: options.libdir,
-                libdir: options.libdir
-            });
-        }
+        var fcontents = import_read_file(file);
+        contents = parse(fcontents, {
+            filename: file,
+            toplevel: contents
+        });
         return new AST_Import({
             module: name,
             argnames: null,
