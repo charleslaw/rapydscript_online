@@ -38,6 +38,9 @@
         right: 0;
         bottom: 1em;
       }
+      .fl {
+        float: left;
+      }
     </style>
     <script type="text/javascript" src="rapydscript/lib/utils.js"></script>
     <script type="text/javascript" src="rapydscript/lib/ast.js"></script>
@@ -48,11 +51,13 @@
   </head>
   <body>
     <div class="title">
-        <a href="http://rapydscript.pyjeon.com">
-          <img src="http://pyjeon.pythonanywhere.com/static/images/rapydscript.png">
-        </a>
-        RapydScript Demo
+        <div class="fl">
+            <a href="http://rapydscript.pyjeon.com">
+                <img src="rapydscript.png">
+            </a>
+            RapydScript Demo
         </div>
+    </div>
     <div class="page">
 <textarea id=code name=code>
 def factorial(n):
