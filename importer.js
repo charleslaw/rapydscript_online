@@ -29,7 +29,7 @@ function import_read_file(fname) {
     }
     if (!(fname in _IMPORTS)) {
         request = new XMLHttpRequest();
-        request.open("GET", "/rapydscript/src/" + fname, false);
+        request.open("GET", "/rapydscript/src/lib/" + fname, false);
         request.send(null);
         if (request.status === 200) {
             _IMPORTS[fname] = request.responseText;

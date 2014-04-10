@@ -1177,36 +1177,12 @@ function parse($TEXT, options) {
         }
         file = tmp.name + file;
         contents = null;
-        try {
-            contents = parse(options.readfile(options.basedir + "/" + file, "utf-8"), {
-                filename: file,
-                toplevel: contents,
-                readfile: options.readfile,
-                basedir: options.basedir,
-                libdir: options.libdir
-            });
-        } catch (_$rapyd$_Exception) {
-            var e = _$rapyd$_Exception;
-            if (!e.message.search("no such file or directory")) {
-                throw _$rapyd$_Exception;
-            }
-            try {
-                contents = parse(options.readfile(options.libdir + "/" + file, "utf-8"), {
-                    filename: file,
-                    toplevel: contents,
-                    readfile: options.readfile,
-                    basedir: options.libdir,
-                    libdir: options.libdir
-                });
-            } catch (_$rapyd$_Exception) {
-                var e = _$rapyd$_Exception;
-                if (e.message.search("no such file or directory")) {
-                    throw "Failed Import: '" + tmp.name + "' module doesn't exist in either '" + options.basedir + "' or '" + options.libdir + "'";
-                } else {
-                    throw _$rapyd$_Exception;
-                }
-            }
-        }
+        var fcontents = import_read_file(file);
+        console.log('abc' + fcontents)
+        contents = parse(fcontents, {
+            filename: file,
+            toplevel: contents
+        });
         return new AST_Import({
             "module": name,
             argnames: null,
