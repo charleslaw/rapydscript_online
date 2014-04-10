@@ -29,7 +29,7 @@
           disclaimer in the documentation and/or other materials
           provided with the distribution.
 
-    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER â€œAS ISâ€ AND ANY
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER “AS IS” AND ANY
     EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
     IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
     PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE
@@ -66,7 +66,9 @@ function OutputStream(options) {
         preserve_line : false,
         namespace_imports: false,
         omit_baselib  : false,
-        private_scope : true
+        private_scope : true,
+        screw_old_browsers: false,
+        auto_bind     : false
     }, true);
 
     var indentation = 0;
@@ -292,7 +294,7 @@ function OutputStream(options) {
                 (!name && token.type == "name") ? token.value : name
             );
         } catch(ex) {
-            AST_Node.warn("Couldn't figure out mapping for {file}:{line},{col} â†’ {cline},{ccol} [{name}]", {
+            AST_Node.warn("Couldn't figure out mapping for {file}:{line},{col} → {cline},{ccol} [{name}]", {
                 file: token.file,
                 line: token.line,
                 col: token.col,
@@ -335,7 +337,7 @@ function OutputStream(options) {
         var line_gen = function(item, i) {
             indent();
             item.forEach(stmt_gen);
-            if (!item.slice(-1)[0].block) semicolon();
+            if (!item.slice(-1)[0].block || item[0] == '=' || item[0] == 'return') semicolon();
             newline();
         }
         var func_gen = function(name, data) {
@@ -356,6 +358,61 @@ function OutputStream(options) {
 
         // --- actual lib-creating logic ---
         var lib = {
+            "abs": function(){
+                //function abs(n){
+                //  return Math.abs(n);
+                //}
+                return func_gen("abs", {
+                    args: ['n'],
+                    body: [
+                        ['return', 'Math.abs', {call: [{sequence: ['n']}]}]
+                    ]
+                });
+            },
+            "bind": function(){
+                //function _$rapyd$_bind(fn, thisArg){
+                //  if (fn.orig) fn = fn.orig;
+                //  if (thisArg === false) return fn;
+                //  var ret = function(){
+                //    return fn.apply(thisArg, arguments);
+                //  };
+                //  ret.orig = fn;
+                //  return ret;
+                //};
+                return func_gen("_$rapyd$_bind", {
+                    args: ['fn', 'thisArg'],
+                    body: [
+                        ['if', {parens: ['fn._orig']}, 'fn', '=', 'fn._orig'],
+                        ['if', {parens: ['thisArg', '===', 'false']}, 'return', 'fn'],
+                        ['var', 'ret', '=', 'fn.bind', {call: [{sequence: ['thisArg']}]}],
+                        ['ret._orig', '=', 'fn'],
+                        ['return', 'ret']
+                    ]
+                });
+            },
+            "rebind_all": function(){
+                //function _$rapyd$_rebindAll(thisArg, rebind) {
+                //  if (typeof rebind === "undefined") rebind = true;
+                //  for (var p in thisArg) {
+                //    if (thisArg[p] && thisArg[p].orig) {
+                //      if (rebind) thisArg[p] = _$rapyd$_bind(thisArg[p], thisArg);
+                //      else thisArg[p] = thisArg[p].orig;
+                //    }
+                //  }
+                //}
+                return func_gen("_$rapyd$_rebindAll", {
+                    args: ['thisArg', 'rebind'],
+                    body: [
+                        ['if', {parens: ['typeof', 'rebind', '===', '"undefined"']}, 'rebind', '=', 'true'],
+                        ['for', {parens: ['var', 'p', 'in', 'thisArg']}, {block: [
+                            ['if', {parens: ['thisArg[p]', '&&', 'thisArg[p]._orig']}, {block: [
+                                ['if', {parens: ['rebind']}, 'thisArg[p]', '=', '_$rapyd$_bind', {call: [{sequence: ['thisArg[p]', 'thisArg']}]}],
+                                ['else', 'thisArg[p]', '=', 'thisArg[p]._orig']
+                            ]}]
+                        ]}]
+                    ]
+                });
+            },
             "enumerate": function(){
                 return func_gen("enumerate", {
                     args: ['item'],
@@ -370,9 +427,45 @@ function OutputStream(options) {
                     ]
                 });
             },
+            "extends": function() {
+                // regular:
+                //
+                // function _$rapyd$_extends(child, parent) {
+                //  child.prototype = new parent;
+                //  child.prototype.constructor = child;
+                //  _$rapyd$_rebindAll(child.prototype);
+                // }
+                //
+                // screw_old_browsers:
+                //
+                // function _$rapyd$_extends(child, parent) {
+                //  child.prototype = Object.create(parent.prototype)
+                //  child.prototype.constructor = child;
+                // }
+                if (options.screw_old_browsers) {
+                    return func_gen("_$rapyd$_extends", {
+                        args: ['child', 'parent'],
+                        body: [
+                            ['child.prototype', '=', 'Object.create', {call: ['parent.prototype']}],
+                            ['child.prototype.constructor', '=', 'child']
+                        ]
+                    });
+                } else {
+                    var body = [
+                        ['child.prototype', '=', 'new', 'parent'],
+                        ['child.prototype.constructor', '=', 'child']
+                    ];
+                    if (options.auto_bind)
+                        body.push(['_$rapyd$_rebindAll', {call: ['child.prototype']}]);
+                    return func_gen("_$rapyd$_extends", {
+                        args: ['child', 'parent'],
+                        body: body
+                    });
+                }
+            },
             "in": function(){
                 //function _$rapyd$_in(val, arr){
-                //  if (arr instanceof Array) return arr.indexOf(val) != -1;
+                //  if (arr instanceof Array || typeof obj === 'string') return arr.indexOf(val) != -1;
                 //  else return val in arr;
                 //}
                 return func_gen("_$rapyd$_in", {
@@ -408,6 +501,21 @@ function OutputStream(options) {
                     ]
                 });
             },
+            "mixin": function() {
+                //function _$rapyd$_mixin(target, source, overwrite) {
+                //  for (var i in source) {
+                //    if (source.hasOwnProperty(i) && (overwrite || typeof target[i] === "undefined")) target[i] = source[i];
+                //  }
+                //}
+                return func_gen("_$rapyd$_mixin", {
+                    args: ['target', 'source', 'overwrite'],
+                    body: [
+                        ['for', {parens: ['var', 'i', 'in', 'source']}, {block: [
+                            ['if', {parens: ['source.hasOwnProperty(i)', '&&', {parens: ['overwrite', '||', 'typeof', 'taget[i]', '===', '"undefined"']}]}, 'target[i]', '=', 'source[i]']
+                        ]}],
+                    ]
+                });
+            },
             "print": function() {
                 // TODO: JSON.stringify will fail in older versions of IE, we
                 // could either ignore this, force-import our own implementation
@@ -438,29 +546,42 @@ function OutputStream(options) {
                 });
             },
             "range": function() {
+                //function range(start, stop, step) {
+                //  if (arguments.length <= 1) {
+                //    stop = start || 0;
+                //    start = 0;
+                //  }
+                //  step = arguments[2] || 1;
+                //
+                //  var length = Math.max(Math.ceil((stop - start) / step), 0);
+                //  var idx = 0;
+                //  var range = new Array(length);
+                //
+                //  while(idx < length) {
+                //    range[idx++] = start;
+                //    start += step;
+                //  }
+                //
+                //  return range;
+                //}
                 return func_gen("range", {
-                    args: ['a', 'b', 'step'],
+                    args: ['start', 'stop', 'step'],
                     body: [
-                        ['var', 'arr', '=', '[]'],
-                        ['if', {parens: ['typeof', 'b', '===', '"undefined"']}, {block: [
-                            ['b', '=', 'a'],
-                            ['a', '=', '0']
+                        ['if', {parens: ['arguments.length', '<=', '1']}, {block: [
+                            ['stop', '=', 'start', '||', '0'],
+                            ['start', '=', '0']
                         ]}],
-                        ['arr[0]', '=', 'a'],
-                        ['step', '=', 'step', '||', '1'],
-                        ['if', {parens: ['step', '>', '0']}, {block: [
-                            ['while', {parens: ['a', '+', 'step', '<', 'b']}, {block: [
-                                ['a', '+=', 'step'],
-                                ['arr[arr.length]', '=', 'a']
-                            ]}]
+                        ['step', '=', 'arguments[2]', '||', '1'],
+                        ['var', 'length', '=', 'Math.max', {parens: [
+                            'Math.ceil', {parens: [{parens: ['stop', '-', 'start']}, '/', 'step']}, ',', '0'
                         ]}],
-                        ['else', {block: [
-                            ['while', {parens: ['a', '+', 'step', '>', 'b']}, {block: [
-                                ['a', '+=', 'step'],
-                                ['arr[arr.length]', '=', 'a']
-                            ]}]
+                        ['var', 'idx', '=', '0'],
+                        ['var', 'range', '=', 'new', 'Array(length)'],
+                        ['while', {parens: ['idx', '<', 'length']}, {block: [
+                            ['range[idx++]', '=', 'start'],
+                            ['start', '+=', 'step']
                         ]}],
-                        ['return', 'arr']
+                        ['return', 'range']
                     ]
                 });
             },
@@ -585,9 +706,12 @@ function OutputStream(options) {
     /* -----[ utils ]----- */
 
     var SPECIAL_METHODS = {
+        'bind'  : '_$rapyd$_bind',
+        'rebind_all'  : '_$rapyd$_rebindAll',
         'bool'  : '!!',
         'float' : 'parseFloat',
         'int'   : 'parseInt',
+        'mixin' : '_$rapyd$_mixin',
         'print' : '_$rapyd$_print'
     };
     var INDEX_COUNTER = 0;
@@ -780,19 +904,19 @@ function OutputStream(options) {
 
     function assign_and_conditional_paren_rules(output) {
         var p = output.parent();
-        // !(a = false) â†’ true
+        // !(a = false) → true
         if (p instanceof AST_Unary)
             return true;
-        // 1 + (a = 2) + 3 â†’ 6, side effect setting a = 2
+        // 1 + (a = 2) + 3 → 6, side effect setting a = 2
         if (p instanceof AST_Binary && !(p instanceof AST_Assign))
             return true;
-        // (a = func)() â€”orâ€” new (a = Object)()
+        // (a = func)() —or— new (a = Object)()
         if (p instanceof AST_BaseCall && p.expression === this)
             return true;
         // (a = foo) ? bar : baz
         if (p instanceof AST_Conditional && p.condition === this)
             return true;
-        // (a = foo)["prop"] â€”orâ€” (a = foo).prop
+        // (a = foo)["prop"] —or— (a = foo).prop
         if (p instanceof AST_PropAccess && p.expression === this)
             return true;
     };
@@ -822,15 +946,34 @@ function OutputStream(options) {
                 stmt.print(output);
                 if (!(i == last && is_toplevel)) {
                     output.newline();
-                    if (is_toplevel) output.newline();
+//                    if (is_toplevel) output.newline();
                 }
             }
         });
     };
 
+    function bind_methods(methods, output) {
+        // bind the methods
+        for (var arg in methods) {
+            output.indent();
+            output.print("this.");
+            output.assign(arg);
+            output.print("_$rapyd$_bind");
+            output.with_parens(function(){
+                output.print("this.");
+                output.print(arg);
+                output.comma();
+                output.print("this");
+            });
+            output.semicolon();
+            output.newline();
+        }
+    }
+
     function display_complex_body(node, is_toplevel, output) {
-        // if *args is set, declare function differently
-        var offset = 0;
+        var offset = 0; // argument offset
+
+        // this is a method, add 'var self = this'
         if (node instanceof AST_Defun && !node.static) {
             output.indent();
             output.print("var");
@@ -841,8 +984,12 @@ function OutputStream(options) {
             output.newline();
             offset++;
         }
+
         if (node instanceof AST_Scope) {
+
+            // if function takes any arguments
             if (node.argnames) {
+                // if *args is set, declare function differently
                 if (node.argnames.starargs) {
                     node.argnames.forEach(function(arg, i){
                         if (i >= offset) {
@@ -871,6 +1018,7 @@ function OutputStream(options) {
                     output.semicolon();
                     output.newline();
                 }
+
                 // initialize default function arguments, if any
                 for (var arg in node.argnames.defaults) {
                     output.indent();
@@ -890,6 +1038,23 @@ function OutputStream(options) {
                     output.newline();
                 }
             }
+
+            // rebind parent's methods and bind own methods
+            // for now we'll make a naive assumption that a function
+            // named __init__ will only occur inside a class
+            if (output.option('auto_bind') && node.name && node.name.name == '__init__') {
+                output.indent();
+                output.print('_$rapyd$_rebindAll');
+                output.with_parens(function(){
+                    output.print('this');
+                    output.comma();
+                    output.print('true');
+                });
+                output.semicolon();
+                output.newline();
+                bind_methods(node.bound, output);
+            }
+
             // declare all variables as local, unless explictly set otherwise
             if (node.localvars.length) {
                 output.indent();
@@ -908,10 +1073,6 @@ function OutputStream(options) {
                 output.print("var");
                 output.space();
                 output.assign(node.argname);
-//                node.argname.print(output);
-//                output.space();
-//                output.print("=");
-//                output.space();
                 output.print("_$rapyd$_Exception");
                 output.semicolon();
                 output.newline();
@@ -989,78 +1150,59 @@ function OutputStream(options) {
 //        }
 //        IMPORTED[self.module.name] = true;
 //    });
+
+    function print_module(self, name, variables, output) {
+        function print_var(name) {
+            if (typeof name === "string") output.print(name);
+            else name.print(output);
+        }
+
+        output.print("var");
+        output.space();
+        output.assign(name);
+        output.with_parens(function() {
+            output.print("function()");
+            output.with_block(function() {
+                // dump the logic of this module
+                display_complex_body(self, false, output);
+
+                // expose local variables to the outside via a hash
+                output.newline();
+                output.indent();
+                output.print("return");
+                output.with_block(function() {
+                    self.variables.forEach(function(arg, i) {
+                        output.indent();
+                        print_var(arg);
+                        output.print(":");
+                        output.space();
+                        print_var(arg);
+                        if (i < self.variables.length-1) output.comma();
+                        output.newline();
+                    });
+                });
+                output.semicolon();
+                output.newline();
+            });
+        });
+        output.print("()");
+        output.semicolon();
+        output.newline();
+    }
+
     DEFPRINT(AST_Import, function(self, output){
         if (output.import(self.module)) {
             if (!output.option("namespace_imports")) {
                 self.body.print(output);
             } else {
-                output.print("var");
-                output.space();
-                output.assign(self.module);
-//                self.module.print(output);
-//                output.space();
-//                output.print("=");
-//                output.space();
-                output.with_block(function() {
-                    self.body.body.forEach(function(stmt, i){
-                        output.newline();
-                        output.indent();
-                        if (stmt instanceof AST_Function) {
-                            stmt.name.print(output);
-                            output.print(":");
-                            output.space();
-                            stmt.name = null;
-                            stmt.print(output);
-                            output.comma();
-                        } else if (stmt instanceof AST_Class) {
-                            stmt.name.print(output);
-                            output.print(":");
-                            output.space();
-                            output.with_parens(function(){
-                                output.print("function()");
-                                output.with_block(function(){
-                                    output.indent();
-                                    stmt.print(output);
-                                    output.newline();
-
-                                    // export the class to outer scope
-                                    output.indent();
-                                    output.print("return");
-                                    output.space();
-                                    stmt.name.print(output);
-                                    output.semicolon();
-                                    output.newline();
-                                });
-                            });
-                            output.print("()");
-                            output.comma();
-                        } else if (stmt instanceof AST_SimpleStatement) {
-                            var chunk = stmt.body;
-                            while (chunk instanceof AST_Assign) {
-                                chunk.left.print(output);
-                                output.print(":");
-                                output.space();
-                                chunk.right.print(output);
-                                chunk = chunk.right;
-                                output.comma();
-                            }
-                        }
-                    });
-                    output.newline();
-                });
-            output.semicolon();
-            output.newline();
+                print_module(self.body, self.module, self.variables, output);
             }
         }
         if (output.option("namespace_imports") && self.argnames) {
-            self.argnames.forEach(function(arg, i) {
+            self.variables.forEach(function(arg) {
                 output.print("var");
                 output.space();
                 output.assign(arg);
-//                arg.print(output);
-//                output.space();
-//                output.print("=");
-//                output.space();
                 self.module.print(output);
                 output.print(".");
                 arg.print(output);
@@ -1343,6 +1485,28 @@ function OutputStream(options) {
     });
 
     /* -----[ functions ]----- */
+    function decorate(node, output, prefix) {
+        if (node.decorators && node.decorators.length) {
+            output.indent();
+            if (prefix) output.print(prefix);
+            output.assign(node.name);
+            var wrap = function(d) {
+                if (d.length) {
+                    output.print(d.slice(0)[0].name);
+                    output.with_parens(function(){
+                        wrap(d.slice(1));
+                    });
+                }
+                else {
+                    if (prefix) output.print(prefix);
+                    node.name.print(output);
+                };
+            };
+            wrap(node.decorators);
+            output.semicolon();
+            output.newline();
+        }
+    }
     AST_Lambda.DEFMETHOD("_do_print", function(output, nokeyword){
         var self = this;
         if (!nokeyword) {
@@ -1362,111 +1526,22 @@ function OutputStream(options) {
         });
         output.space();
         print_bracketed(self, output, true);
-        if (self.decorators && self.decorators.length) {
-            output.newline();
-            output.indent();
-            output.assign(self.name);
-            var wrap = function(d) {
-                if (d.length) {
-                    output.print(d.slice(0)[0].name);
-                    output.with_parens(function(){
-                        wrap(d.slice(1));
-                    });
-                }
-                else self.name.print(output);
-            };
-            wrap(self.decorators);
-            output.semicolon();
-        }
+        decorate(self, output);
     });
     DEFPRINT(AST_Lambda, function(self, output){
         self._do_print(output);
     });
 
     /* -----[ classes ]----- */
-//    AST_Class.DEFMETHOD("_do_print", function(output){
-//        var self = this;
-//        var constructorArgs = function(output){
-//            if (!self.init) output.print("()");
-//            else {
-//                output.with_parens(function(){
-//                    self.init.argnames.forEach(function(arg, i){
-//                        if (i) output.comma();
-//                        arg.print(output);
-//                    });
-//                });
-//            }
-//        };
-//        output.print("var");
-//        output.space();
-//        self.name.print(output);
-//        output.space();
-//        output.print("=");
-//        output.space();
-//        output.with_parens(function(){
-//            output.print("function");
-//            output.print("()");
-//            output.with_block(function(){
-//                // generate constructor
-//                output.indent();
-//                if (self.init) {
-//                    self.init.print(output);
-//                } else {
-//                    output.print("function");
-//                    output.space();
-//                    self.name.print(output);
-//                    constructorArgs(output);
-//                    output.print("{}");
-//                }
-//                output.newline();
-//                output.indent();
-//
-//                // inheritance
-//                if (self.parent) {
-//                    self.name.print(output);
-//                    output.print(".prototype");
-//                    output.space();
-//                    output.print("=");
-//                    output.space();
-//                    self.parent.print(output);
-//                    output.semicolon();
-//                    output.newline();
-//                    output.indent();
-//                }
-//
-//                // class-generator function
-//                output.print("return");
-//                output.space();
-//                output.print("function");
-//                constructorArgs(output);
-//                output.space();
-//                output.with_block(function(){
-//                    output.indent();
-//                    output.print("return new");
-//                    output.space();
-//                    self.name.print(output);
-//                    constructorArgs(output);
-//                    output.semicolon();
-//                    output.newline();
-//                });
-//                output.semicolon();
-//                output.newline();
-//            });
-//            // trigger a call for this module
-//            output.print("()");
-//        });
-//        output.semicolon();
-//    });
     AST_Class.DEFMETHOD("_do_print", function(output){
         var self = this;
+        if (self.external) {
+            return;
+        }
+
         var class_def = function(method) {
             output.indent();
             self.name.print(output);
-//            output.print(".prototype");
-//            if (method) output.print("." + method);
-//            output.space();
-//            output.print("=");
-//            output.space();
             if (method && self.static.indexOf(method) != -1)
                 output.assign("." + method);
             else
@@ -1475,21 +1550,22 @@ function OutputStream(options) {
         var class_fun_def = function(stmt) {
             var name = stmt.name.name;
             if (name == "__init__") {
-//                self.name.print(output);
-//                output.space();
-//                output.print("=");
-//                output.space();
-                output.assign(self.name);
+                stmt.bound = self.bound;
+                output.print("function");
+                output.space();
+                self.name.print(output);
             } else {
                 output.newline();
                 class_def(name);
+                output.print("function");
+                output.space();
+                output.print(name);
             }
-            output.print("function");
             output.with_parens(function(){
                 if (!stmt.argnames.starargs) {
                     stmt.argnames.forEach(function(arg, i){
                         // only strip first argument if the method isn't static
-                        if (self.static.indexOf(name) != -1) i = 1;
+                        if (self.static.indexOf(name) != -1) i++;
                         if (i > 1) output.comma();
                         if (i) arg.print(output);
                     });
@@ -1497,6 +1573,8 @@ function OutputStream(options) {
             });
             print_bracketed(stmt, output, true);
             output.semicolon();
+            output.newline();
+            decorate(stmt, output, self.name.name + ".prototype.");
         };
 
         // generate constructor
@@ -1510,6 +1588,7 @@ function OutputStream(options) {
             output.print("()");
             output.space();
             output.with_block(function(){
+                bind_methods(self.bound, output);
                 output.indent();
                 self.parent.print(output);
                 output.print(".prototype.constructor.apply");
@@ -1522,36 +1601,29 @@ function OutputStream(options) {
                 output.newline();
             });
         } else {
+            // no init method or parent, create empty init
             output.print("function");
             output.space();
             self.name.print(output);
             output.print("()");
             output.space();
-            output.print("{}")
-//            output.with_block(function(){
-//                if (self.parent) {
-//                    output.indent();
-//                    self.parent.print(output);
-//                    output.print(".prototype.constructor.call(this)");
-//                    output.semicolon();
-//                    output.newline();
-//                }
-//            });
+            output.with_block(function(){
+                bind_methods(self.bound, output);
+            });
         }
+        output.newline();
 
         // inheritance
         if (self.parent) {
-            output.newline();
-            class_def();
-            output.print("new");
-            output.space();
-            self.parent.print(output);
-            output.print("()");
+            output.indent();
+            output.print('_$rapyd$_extends');
+            output.with_parens(function(){
+                self.name.print(output);
+                output.comma();
+                self.parent.print(output);
+            });
             output.semicolon();
             output.newline();
-            class_def("constructor");
-            self.name.print(output);
-            output.semicolon();
         }
 
         // actual methods
@@ -1561,15 +1633,29 @@ function OutputStream(options) {
                     class_fun_def(stmt);
                 }
             } else if (stmt instanceof AST_Class) {
-                output.newline();
                 output.indent();
                 self.name.print(output);
                 output.print(".");
                 stmt.print(output);
+                output.newline();
             }
         });
+        decorate(self, output);
     });
     DEFPRINT(AST_Class, function(self, output){
+        self._do_print(output);
+    });
+
+    /* -----[ modules ]----- */
+    AST_Module.DEFMETHOD("_do_print", function(output){
+        var self = this;
+        if (self.external) {
+            return;
+        }
+        print_module(self, self.name, self.variables, output);
+        decorate(self, output);
+    });
+    DEFPRINT(AST_Module, function(self, output){
         self._do_print(output);
     });
 
@@ -1839,11 +1925,11 @@ function OutputStream(options) {
     DEFPRINT(AST_BaseCall, function(self, output){
         if (self instanceof AST_ClassCall) {
             if (self.static) {
-                output.print(self.class);
+                self.class.print(output);
                 output.print(".");
                 output.print(self.method);
             } else {
-                output.print(self.class);
+                self.class.print(output);
                 output.print(".prototype.");
                 output.print(self.method);
                 output.print(".call");

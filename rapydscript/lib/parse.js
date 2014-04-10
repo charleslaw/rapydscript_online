@@ -29,7 +29,7 @@
           disclaimer in the documentation and/or other materials
           provided with the distribution.
 
-    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER â€œAS ISâ€ AND ANY
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER “AS IS” AND ANY
     EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
     IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
     PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE
@@ -46,7 +46,7 @@
 
 "use strict";
 
-var KEYWORDS = 'as break case class const continue debugger default def del do elif else except finally for from if import in instanceof is new nonlocal pass raise return switch try typeof var void while with or and not';
+var KEYWORDS = 'as break case class const continue debugger default def del do elif else except finally for from if import in instanceof is module new nonlocal pass raise return switch til to try typeof var void while with or and not';
 var KEYWORDS_ATOM = 'False None True';
 var RESERVED_WORDS = 'abstract boolean byte char double enum export extends final float goto implements int interface long native package private protected public short static super synchronized this throws transient volatile'
     + " " + KEYWORDS_ATOM + " " + KEYWORDS;
@@ -61,12 +61,12 @@ var NATIVE_CLASSES = {
     'Image': {},
     'RegExp': {},
     'Error': {},
-    'Object': {static: ['getOwnPropertyNames']},
+    'Object': {static: ['getOwnPropertyNames', 'keys', 'create']},
     'String': {static: ['fromCharCode']},
-    'Array': {},
-    'Number': {},
+    'Array': {static: ['isArray', 'from', 'of']},
+    'Number': {static: ['isFinite', 'isNaN']},
     'Function': {},
-    'Date': {},
+    'Date': {static: ['UTC', 'now', 'parse']},
     'Boolean': {},
     'ArrayBuffer': {},
     'DataView': {},
@@ -132,6 +132,8 @@ var OPERATORS = makePredicate([
     "&=",
     "and",
     "or",
+    "til",
+    "to",
     "@"
 ]);
 
@@ -229,11 +231,11 @@ JS_Parse_Error.prototype.toString = function() {
 };
 
 function js_error(message, filename, line, col, pos) {
-    AST_Node.warn("ERROR: {message} [{file}:{line},{col}]", {
-        message: message,
-        file: filename,
-        line: line,
-        col: col
+    AST_Node.warn("ERROR: {message} [{file}:{line},{col}]", {
+        message: message,
+        file: filename,
+        line: line,
+        col: col
     });
     throw new JS_Parse_Error(message, line, col, pos);
 };
@@ -268,6 +270,7 @@ function tokenizer($TEXT, filename) {
     };
 
     function peek() { return S.text.charAt(S.pos); };
+    function prevChar() { return S.text.charAt(S.tokpos-1); };
 
     function next(signal_eof, in_string) {
         var ch = S.text.charAt(S.pos++);
@@ -655,7 +658,7 @@ function tokenizer($TEXT, filename) {
         var word = read_name();
         return KEYWORDS_ATOM(word) ? token("atom", word)
             : !KEYWORDS(word) ? token("name", word)
-            : OPERATORS(word) ? token("operator", word)
+            : OPERATORS(word) && prevChar() != '.' ? token("operator", word)
             : token("keyword", word);
     };
 
@@ -704,7 +707,7 @@ function tokenizer($TEXT, filename) {
             return next_token();
         }
         if (code == 92 || is_identifier_start(code)) return read_word();
-        parse_error("Unexpected character '" + ch + "'");
+        parse_error("Unexpected character «" + ch + "»");
     };
 
     next_token.context = function(nc) {
@@ -770,6 +773,7 @@ function parse($TEXT, options) {
     options = defaults(options, {
         strict   : false,
         filename : null,
+        auto_bind: false,
         toplevel : null
     });
 
@@ -784,7 +788,9 @@ function parse($TEXT, options) {
         in_class      : [false],
         classes       : [{}],
         labels        : [],
-        decorators    : []
+        decorators    : [],
+        module_tree   : {}, // tree describing the structure of modules and classes within them (module: {}, class: undefined)
+        module_stack  : [] // current location in the module tree
     };
 
     S.token = next();
@@ -829,14 +835,14 @@ function parse($TEXT, options) {
     function unexpected(token) {
         if (token == null)
             token = S.token;
-        token_error(token, "Unexpected token: " + token.type + " '" + token.value + "'");
+        token_error(token, "Unexpected token: " + token.type + " «" + token.value + "»");
     };
 
     function expect_token(type, val) {
         if (is(type, val)) {
             return next();
         }
-        token_error(S.token, "Unexpected token " + S.token.type + " '" + S.token.value + "'" + ", expected " + type + " '" + val + "'");
+        token_error(S.token, "Unexpected token " + S.token.type + " «" + S.token.value + "»" + ", expected " + type + " «" + val + "»");
     };
 
     function expect(punc) { return expect_token("punc", punc); };
@@ -870,38 +876,45 @@ function parse($TEXT, options) {
         };
     };
 
-    function scan_for_local_vars(body) {
+    function scan_for_local_vars(body, is_module) {
         var vars = [];
         if (body instanceof Array) {
             for (var stmt in body) {
-                if (body[stmt] instanceof AST_Scope) continue; // don't invade nested scopes
+                if (body[stmt] instanceof AST_Scope) {
+                    if (is_module && body[stmt].name) vars.push(body[stmt].name);
+                    continue; // don't invade nested scopes
+                }
+
                 ['body', 'alternative'].forEach(function(option) {
                     var opt = body[stmt][option];
-                    if (opt) vars = vars.concat(scan_for_local_vars(opt));
+                    if (opt) vars = vars.concat(scan_for_local_vars(opt, is_module));
                     if (opt && (opt.operator == "=") && !(opt.right instanceof AST_Scope))
-                        vars = vars.concat(scan_for_local_vars(opt.right));
+                        vars = vars.concat(scan_for_local_vars(opt.right, is_module));
                 });
+
                 // pick up iterators from loops
-                if (body[stmt] instanceof AST_ForIn) {
+                if (!is_module && body[stmt] instanceof AST_ForIn) {
 //                    vars.push("_$rapyd$_Iter");
-                    if (body[stmt].init instanceof AST_Array)
+                    if (body[stmt].init instanceof AST_Array) {
+                        vars.push('_$rapyd$_Unpack');
                         body[stmt].init.elements.forEach(function(elem){
                             if (vars.indexOf(elem.name) == -1) vars.push(elem.name);
                         });
-                    else if (vars.indexOf(body[stmt].init.name) == -1)
+                    } else if (vars.indexOf(body[stmt].init.name) == -1)
                         vars.push(body[stmt].init.name);
                 }
             }
         } else if (body.body) {
-            vars = vars.concat(scan_for_local_vars(body.body));
+            vars = vars.concat(scan_for_local_vars(body.body, is_module));
             if (body.alternative)
-                vars = vars.concat(scan_for_local_vars(body.alternative));
+                vars = vars.concat(scan_for_local_vars(body.alternative, is_module));
         } else if (body instanceof AST_Assign) {
-            if (body.left instanceof AST_Array)
+            if (body.left instanceof AST_Array) {
+                vars.push('_$rapyd$_Unpack');
                 body.left.elements.forEach(function(elem){
-                    if (vars.indexOf(elem.name) == -1) vars.push(elem.name);
+                    if (!(elem instanceof AST_PropAccess) && vars.indexOf(elem.name) == -1) vars.push(elem.name);
                 });
-            else if (body.left.name && vars.indexOf(body.left.name) == -1)
+            } else if (body.left.name && vars.indexOf(body.left.name) == -1)
                 vars.push(body.left.name);
         }
         return vars;
@@ -932,7 +945,8 @@ function parse($TEXT, options) {
     function finalize_import(imp) {
         var classes = scan_for_classes(imp.body.body);
         for (var c in classes) {
-            S.classes[0][c] = classes[c];
+            if (classes[c] instanceof ModuleTreeNode) S.module_tree[c] = classes[c];
+            else S.classes[0][c] = classes[c]; // append outer-most classes from imported module to outer scope
         }
         var key = "";
         while (imp instanceof AST_Dot) {
@@ -1021,7 +1035,12 @@ function parse($TEXT, options) {
                 return finalize_import(import_());
 
               case "class":
-                return class_(true);
+                BASELIB["extends"] = true;
+                if (options.auto_bind) BASELIB["rebind_all"] = true;
+                return class_();
+
+              case "module":
+                return module_();
 
               case "def":
                 var start = prev();
@@ -1180,11 +1199,14 @@ function parse($TEXT, options) {
 
     // scan function/class body for nested class declarations
     function scan_for_classes(body) {
-        var classes = {};
+//        var classes = {};
+        var classes = new ModuleTreeNode();
         for (var i in body) {
             var stmt = body[i];
             if (stmt instanceof AST_Class) {
-                classes[stmt.name.name] = {static: stmt.static};
+                classes[stmt.name.name] = {static: stmt.static, bound: stmt.bound};
+            } else if (stmt instanceof AST_Module) {
+                classes[stmt.name.name] = scan_for_classes(stmt.body);
             }
         }
         return classes;
@@ -1199,11 +1221,45 @@ function parse($TEXT, options) {
                 if (S.classes[s].hasOwnProperty(expr.name)) return S.classes[s][expr.name];
             }
         }
-//        else if (expr instanceof AST_Dot) {
-//            // this one is for detecting nested classes
-//            while (expr instanceof AST_Dot) {
-//            }
-//        }
+        else if (expr instanceof AST_Dot) {
+            var referenced_path = [];
+            // this one is for detecting classes inside modules and eventually nested classes
+            while (expr instanceof AST_Dot) {
+                referenced_path.unshift(expr.property);
+                expr = expr.expression;
+            }
+            if (expr instanceof AST_SymbolRef) {
+                referenced_path.unshift(expr.name); // now 'referenced_path' should contain the full path of potential class
+
+                // Due to scoping that prefers local-most variables, there are multiple ways a class could be referenced.
+                // To emulate this behavior, we'd need to travel into inner-most scope first and from there keep traveling
+                // outward, while testing for existance of the given object chain in each scope level.
+                var current_scope = S.module_stack.slice();
+                current_scope.unshift(''); // global scope
+                while (current_scope.length) {
+                    // navigate to correct location in the module
+                    var visible_scope = S.module_tree;
+                    current_scope.forEach(function(module){
+                        if (module in visible_scope) visible_scope = visible_scope[module];
+                    });
+
+                    // now try to find the given path in the tree
+                    var traversed_path = referenced_path.slice();
+                    while (traversed_path && visible_scope[traversed_path[0]]) {
+                        visible_scope = visible_scope[traversed_path[0]];
+                        traversed_path.shift();
+                    }
+
+                    // we arrived to the end of the path, if visible_scope points to a class, then this call is for a class
+                    if (!traversed_path.length) {
+                        if (!(visible_scope instanceof ModuleTreeNode)) return visible_scope;
+                        else return false; // this call points to a module itself, maybe we should throw an error here
+                    }
+
+                    current_scope.pop();
+                }
+            }
+        }
         return false;
     }
 
@@ -1225,7 +1281,13 @@ function parse($TEXT, options) {
         return new AST_Import({
             module: name,
             argnames: null,
-            body: contents
+            body: contents,
+            variables: (function(){
+                // detect publically-seen variables
+                return scan_for_local_vars(contents, true).filter(function(element, index, arr) {
+                    return arr.lastIndexOf(element) === index;
+                });
+            })()
         });
     }
 
@@ -1239,24 +1301,11 @@ function parse($TEXT, options) {
         file = name.name + file;
         expect_token("keyword" ,"import");
         var contents = null;
-        try {
-            contents = parse(options.readfile(options.basedir + "/" + file, "utf-8"), {
-                filename: file,
-                toplevel: contents,
-                readfile: options.readfile,
-                basedir: options.basedir,
-                libdir: options.libdir
-            });
-        } catch (e) {
-            contents = parse(options.readfile(options.libdir + "/" + file, "utf-8"), {
-                // didn't find it in local directory, check libs
-                filename: file,
-                toplevel: contents,
-                readfile: options.readfile,
-                basedir: options.libdir,
-                libdir: options.libdir
-            });
-        }
+        var fcontents = import_read_file(file);
+        contents = parse(fcontents, {
+            filename: file,
+            toplevel: contents
+        });
         return new AST_Import({
             module: name,
             argnames: (function(a){
@@ -1271,26 +1320,104 @@ function parse($TEXT, options) {
         });
     }
 
-    var class_ = function(in_statement) {
+    var ModuleTreeNode = function() {}; // this exists to allow 'instanceof' check from within get_class_in_scope()
+
+    var module_ = function(use_name) {
+        var name = use_name ? use_name : as_symbol(AST_SymbolDefun);
+        if (!name)
+            unexpected();
+
+        // detect external modules
+        var externaldecorator = S.decorators.indexOf("external");
+        if (externaldecorator != -1) {
+            S.decorators.splice(externaldecorator, 1);
+        }
+
+        var definition = new AST_Module({
+            name: name,
+            body: (function(){
+                // navigate to correct location in the module tree and append the module
+                var module_tree = S.module_tree;
+                S.module_stack.forEach(function(module){
+                    module_tree = module_tree[module];
+                });
+                module_tree[name.name] = new ModuleTreeNode();
+
+                S.module_stack.push(name.name);
+                var a = block_();
+                S.module_stack.pop();
+                return a;
+            })(),
+            external: externaldecorator != -1,
+            decorators: (function(){
+                var d = [];
+                S.decorators.forEach(function(decorator){
+                    d.push(new AST_Decorator({name: decorator}));
+                });
+                S.decorators = [];
+                return d;
+            })(),
+            variables: [],
+            localvars: []
+        });
+
+        // detect publically-seen variables
+        definition.variables = scan_for_local_vars(definition.body, true).filter(function(element, index, arr) {
+            return arr.lastIndexOf(element) === index;
+        });
+        definition.localvars = scan_for_local_vars(definition.body, false).filter(function(element, index, arr) {
+            return arr.lastIndexOf(element) === index;
+        }).map(function(element) {
+            return new_symbol(AST_SymbolVar, element);
+        });
+        return definition;
+    };
+
+    var class_ = function() {
         var name = as_symbol(AST_SymbolDefun);
         if (!name)
             unexpected();
-        var class_details = {static: []};
+
+        // detect external classes
+        var externaldecorator = S.decorators.indexOf("external");
+        if (externaldecorator != -1) {
+            S.decorators.splice(externaldecorator, 1);
+        }
+
+        var class_details = {static: [], bound: {}};
         var definition = new AST_Class({
             name: name,
             parent: (function(){
                 if (is("punc", "(")) {
                     next();
-                    var a = as_symbol(AST_SymbolFunarg);
+                    var a = expr_atom(false);
                     expect(")");
                     return a;
                 } else {
                     return null;
                 }
             })(),
+            modules: S.module_stack.slice(),
             localvars: [],
             static: class_details.static,
+            external: externaldecorator != -1,
+            bound: class_details.bound,
+            decorators: (function(){
+                var d = [];
+                S.decorators.forEach(function(decorator){
+                    d.push(new AST_Decorator({name: decorator}));
+                });
+                S.decorators = [];
+                return d;
+            })(),
             body: (function(loop, labels){
+                // navigate to correct location in the module tree and append the class
+                var module_tree = S.module_tree;
+                S.module_stack.forEach(function(module){
+                    module_tree = module_tree[module];
+                });
+                module_tree[name.name] = class_details;
+
                 S.in_class.push(name.name);
                 S.classes[S.classes.length-1][name.name] = class_details;
                 S.classes.push({});
@@ -1330,9 +1457,16 @@ function parse($TEXT, options) {
         if (in_class && !name)
             unexpected();
         var staticmethod = false;
-        if (in_class && S.decorators.indexOf("staticmethod") != -1) {
-            S.classes[S.classes.length-2][in_class].static.push(name.name);
-            staticmethod = true;
+        if (in_class) {
+            var staticloc = S.decorators.indexOf("staticmethod");
+            if (staticloc != -1) {
+                S.decorators.splice(staticloc, 1);
+                S.classes[S.classes.length-2][in_class].static.push(name.name);
+                staticmethod = true;
+            } else if (name.name != "__init__" && options.auto_bind) {
+                BASELIB["bind"] = true;
+                S.classes[S.classes.length-2][in_class].bound[name.name] = true;
+            }
         }
         expect("(");
         if (!ctor) ctor = in_class ? AST_Defun : AST_Function;
@@ -1361,6 +1495,14 @@ function parse($TEXT, options) {
                 return a;
             })(true, []),
             localvars: [],
+            decorators: (function(){
+                var d = [];
+                S.decorators.forEach(function(decorator){
+                    d.push(new AST_Decorator({name: decorator}));
+                });
+                S.decorators = [];
+                return d;
+            })(),
             body: (function(loop, labels){
                 S.in_class.push(false);
                 S.classes.push({});
@@ -1375,18 +1517,14 @@ function parse($TEXT, options) {
                 S.in_loop = loop;
                 S.labels = labels;
                 return a;
-            })(S.in_loop, S.labels),
-            decorators: (function(){
-                var d = [];
-                S.decorators.forEach(function(decorator){
-                    d.push(new AST_Decorator({name: decorator}));
-                });
-                S.decorators = [];
-                return d;
-            })()
+            })(S.in_loop, S.labels)
         });
         if (definition instanceof AST_Defun) definition.static = staticmethod;
-        var assignments = scan_for_local_vars(definition.body);
+
+        // detect local variables, strip function arguments
+        var assignments = scan_for_local_vars(definition.body, false).filter(function(element, index, arr) {
+            return arr.lastIndexOf(element) === index;
+        });
         for (var i=0; i < assignments.length; i++) {
             for (var j=0; j <= definition.argnames.length; j++) {
                 if (j == definition.argnames.length)
@@ -1641,7 +1779,7 @@ function parse($TEXT, options) {
         }
         if (is("keyword", "class")) {
             next();
-            var cls = class_(false);
+            var cls = class_();
             cls.start = start;
             cls.end = prev();
             return subscripts(cls, allow_calls);
@@ -1706,7 +1844,33 @@ function parse($TEXT, options) {
                 expect("]");
                 return ret;
             }
-            if (!is("punc", "]")) expect(",");
+            if (is("operator", "til")) {
+                next();
+                expr.push(expression(false));
+                var ret = subscripts(new AST_Call({
+                    start      : S.token,
+                    expression : new AST_SymbolRef({ name: "range" }),
+                    args       : expr,
+                    end        : prev()
+                }), true);
+                expect("]");
+                return ret;
+            } else if (is("operator", "to")) {
+                next();
+                expr.push(new AST_Binary({
+                    left: expression(false),
+                    operator: '+',
+                    right: new AST_Number({ value: 1 })
+                }));
+                var ret = subscripts(new AST_Call({
+                    start      : S.token,
+                    expression : new AST_SymbolRef({ name: "range" }),
+                    args       : expr,
+                    end        : prev()
+                }), true);
+                expect("]");
+                return ret;
+            } else if (!is("punc", "]")) expect(",");
         }
         return new AST_Array({
             elements: expr.concat(expr_list("]", !options.strict, true))
@@ -1838,18 +2002,24 @@ function parse($TEXT, options) {
             next();
             var slice_bounds = [];
             var is_slice = false;
-            if (is("punc", ":"))
+            
+            if (is("punc", ":")) {
+                // slice [:n]
                 slice_bounds.push(new AST_Number({
                     value: 0
                 }));
-            else
+            } else {
                 slice_bounds.push(expression(false));
+            }
+
             if (is("punc", ":")) {
+                // slice [n:m?]
                 is_slice = true;
                 next();
                 if (!is("punc", "]"))
                     slice_bounds.push(expression(false));
             }
+
             expect("]");
             if (is_slice) {
                 return subscripts(new AST_Call({
@@ -1904,7 +2074,7 @@ function parse($TEXT, options) {
                         funcname.property = "constructor";
                     return subscripts(new AST_ClassCall({
                         start      : start,
-                        class      : expr.expression.name,
+                        class      : expr.expression,
                         method     : funcname.property,
                         static     : is_static_method(c, funcname.property),
                         args       : func_call_list(),
@@ -1912,8 +2082,12 @@ function parse($TEXT, options) {
                     }), true);
                 } else if (expr instanceof AST_SymbolRef) {
                     switch (expr.name) {
+                        case "abs":
+                        case "bind":
+                        case "rebind_all":
                         case "enumerate":
                         case "len":
+                        case "mixin":
                         case "print":
                         case "range":
                         case "reversed":
@@ -1956,7 +2130,7 @@ function parse($TEXT, options) {
         if (is("operator") && UNARY_PREFIX(start.value)) {
             next();
             if (start.value == "@") {
-                if (is("name") && (peek().value == "@" || peek().value == "def")) {
+                if (is("name") && (peek().value == "@" || peek().value == "def" || peek().value == "class" || peek().value == "module")) {
                     S.decorators.push(S.token.value);
                     next();
                     return new AST_EmptyStatement();
@@ -1979,7 +2153,7 @@ function parse($TEXT, options) {
 
     function make_unary(ctor, op, expr) {
         if (op == "++" || op == "--")
-            croak("Invalid operator '" + op + "'");
+            croak("Invalid operator «" + op + "»");
         return new ctor({ operator: op, expression: expr });
     };
 
@@ -2194,7 +2368,9 @@ function parse($TEXT, options) {
         } else {
             toplevel = new AST_Toplevel({ start: start, body: body, end: end });
         }
-        var assignments = scan_for_local_vars(toplevel.body);
+        var assignments = scan_for_local_vars(toplevel.body, false).filter(function(element, index, arr) {
+            return arr.lastIndexOf(element) === index;
+        });
         toplevel.localvars = [];
         assignments.forEach(function(item){
             toplevel.localvars.push(new_symbol(AST_SymbolVar, item));

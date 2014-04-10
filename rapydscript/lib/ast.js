@@ -29,7 +29,7 @@
           disclaimer in the documentation and/or other materials
           provided with the distribution.
 
-    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER â€œAS ISâ€ AND ANY
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER “AS IS” AND ANY
     EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
     IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
     PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE
@@ -345,11 +345,12 @@ var AST_Toplevel = DEFNODE("Toplevel", "globals baselib imports", {
     }
 }, AST_Scope);
 
-var AST_Import = DEFNODE("Import", "module argnames body", {
+var AST_Import = DEFNODE("Import", "module argnames variables body", {
     $documentation: "Container for imported files",
     $propdoc: {
         module: "[AST_SymbolVar] name of the module we're importing",
         argnames: "[AST_SymbolVar*] names of objects to be imported",
+        variables: "[Object/S] a map of name -> SymbolDef for all variables/functions defined in this scope",
         body: "[AST_TopLevel] contents of the imported file"
     },
 }, AST_Statement);
@@ -388,13 +389,17 @@ var AST_Function = DEFNODE("Function", null, {
     $documentation: "A function expression"
 }, AST_Lambda);
 
-var AST_Class = DEFNODE("Class", "init name parent static", {
+var AST_Class = DEFNODE("Class", "init name parent static external bound decorators modules", {
     $documentation: "A class declaration",
     $propdoc: {
         name: "[AST_SymbolDeclaration?] the name of this class",
         init: "[AST_Function] constructor for the class",
         parent: "[AST_Class?] parent class this class inherits from",
-        static: "[string*] list of static methods"
+        static: "[string*] list of static methods",
+        external: "[boolean] true if class is declared elsewhere, but will be within current scope at runtime",
+        bound: "[string*] list of methods that need to be bound to behave correctly (function pointers)",
+        decorators: "[AST_Decorator*] function decorators, if any",
+        modules: "[string*] module stack that this class resides inside of, if any"
     },
     _walk: function(visitor) {
         return visitor._visit(this, function(){
@@ -402,6 +407,15 @@ var AST_Class = DEFNODE("Class", "init name parent static", {
             walk_body(this, visitor);
             this.parent._walk(visitor);
         });
+    }
+}, AST_Scope);
+
+var AST_Module = DEFNODE("Module", "name external decorators", {
+    $documentation: "A module definition, meant to abstract a group of related classes and/or functions",
+    $propdoc: {
+        name: "[AST_SymbolDeclaration?] the name of this class",
+        external: "[boolean] true if module is declared elsewhere, but will be within current scope at runtime",
+        decorators: "[AST_Decorator*] module decorators, if any"
     }
 }, AST_Scope);
 
@@ -415,11 +429,11 @@ var AST_Defun = DEFNODE("Defun", "static", {
 /* -----[ JUMPS ]----- */
 
 var AST_Jump = DEFNODE("Jump", null, {
-    $documentation: "Base class for â€œjumpsâ€ (for now that's `return`, `throw`, `break` and `continue`)"
+    $documentation: "Base class for “jumps” (for now that's `return`, `throw`, `break` and `continue`)"
 }, AST_Statement);
 
 var AST_Exit = DEFNODE("Exit", "value", {
-    $documentation: "Base class for â€œexitsâ€ (`return` and `throw`)",
+    $documentation: "Base class for “exits” (`return` and `throw`)",
     $propdoc: {
         value: "[AST_Node?] the value returned or thrown by this statement; could be null for AST_Return"
     },
@@ -480,7 +494,7 @@ var AST_If = DEFNODE("If", "condition alternative", {
 var AST_Switch = DEFNODE("Switch", "expression", {
     $documentation: "A `switch` statement",
     $propdoc: {
-        expression: "[AST_Node] the `switch` â€œdiscriminantâ€"
+        expression: "[AST_Node] the `switch` “discriminant”"
     },
     _walk: function(visitor) {
         return visitor._visit(this, function(){
@@ -702,7 +716,7 @@ var AST_Seq = DEFNODE("Seq", "car cdr", {
 var AST_PropAccess = DEFNODE("PropAccess", "expression property", {
     $documentation: "Base class for property access expressions, i.e. `a.foo` or `a[\"foo\"]`",
     $propdoc: {
-        expression: "[AST_Node] the â€œcontainerâ€ expression",
+        expression: "[AST_Node] the “container” expression",
         property: "[AST_Node|string] the property to access.  For AST_Dot this is always a plain string, while for AST_Sub it's an arbitrary AST_Node"
     }
 });
@@ -779,7 +793,7 @@ var AST_Conditional = DEFNODE("Conditional", "condition consequent alternative",
 });
 
 var AST_Assign = DEFNODE("Assign", null, {
-    $documentation: "An assignment expression â€” `a = b + 5`",
+    $documentation: "An assignment expression — `a = b + 5`",
 }, AST_Binary);
 
 /* -----[ LITERALS ]----- */
@@ -799,7 +813,7 @@ var AST_Array = DEFNODE("Array", "elements", {
 });
 
 var AST_TupleUnpack = DEFNODE("TupleUnpack", "elements right", {
-    $documentation: "An array literal",
+    $documentation: "An object used to represent tuple unpacking",
     $propdoc: {
         elements: "[AST_Node*] array of elements being assigned to",
         right: "[AST_Node] right-hand side expression"
