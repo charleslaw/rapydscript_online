@@ -4,10 +4,22 @@ function _$rapyd$_extends(child, parent) {
 }
 function _$rapyd$_in(val, arr) {
     if (arr instanceof Array || typeof arr === "string") return arr.indexOf(val) != -1;
-    else return val in arr;
+    else {
+        for (i in arr) {
+            if (arr.hasOwnProperty(i) && i === val) return true;
+        }
+        return false;
+    }
 }
 function abs(n) {
     return Math.abs(n);
+}
+function dir(item) {
+    var arr = [];
+    for (var i in item) {
+        arr.push(i);
+    }
+    return arr;
 }
 function len(obj) {
     if (obj instanceof Array || typeof obj === "string") return obj.length;
